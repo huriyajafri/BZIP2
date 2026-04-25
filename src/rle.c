@@ -10,8 +10,8 @@ void rle1_encode(unsigned char *input, size_t len,
         unsigned char current = input[i];
         int count = 1;
 
-        // count repeats
-        while (i + 1 < len && input[i] == input[i + 1]) {
+        // Added count < 255 guard to prevent overflow
+        while (i + 1 < len && input[i] == input[i + 1] && count < 255) {
             count++;
             i++;
         }
