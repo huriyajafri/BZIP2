@@ -1,7 +1,7 @@
 CC = gcc
-CFLAGS = -Iinclude
+CFLAGS = -Iinclude -Wall -O2
 
-SOURCES = src/main.c src/block.c src/rle.c src/bwt.c src/config.c
+SOURCES = src/main.c src/block.c src/rle.c src/bwt.c src/config.c src/mtf.c src/huffman.c
 TARGET = program
 
 .PHONY: all clean run help

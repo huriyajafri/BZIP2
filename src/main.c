@@ -5,6 +5,8 @@
 #include "rle.h"
 #include "bwt.h"
 #include "config.h"
+#include "mtf.h"
+#include "huffman.h"
 
 /* Get file size */
 long get_file_size(const char *filename) {
@@ -17,16 +19,27 @@ long get_file_size(const char *filename) {
     return size;
 }
 
-/* Safe print (ASCII + hex fallback) */
+/* Safe print (ASCII only) */
 void print_bytes(unsigned char *data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         unsigned char ch = data[i];
-
-        if (ch >= 32 && ch <= 126) {
+        if (ch >= 32 && ch <= 126)
             printf("%c", ch);
-        }
-        // else: skip silently
     }
+}
+
+/* helper function */
+void debug_print(const char *label, unsigned char *data, size_t len) {
+    printf("%s (%zu bytes): ", label, len);
+
+    for (size_t i = 0; i < len && i < 50; i++) {
+        if (data[i] >= 32 && data[i] <= 126)
+            printf("%c", data[i]);
+        else
+            printf(".");
+    }
+
+    printf("\n");
 }
 
 int main() {
@@ -34,159 +47,208 @@ int main() {
     Config config;
 
     if (load_config("config.ini", &config) != 0) {
+        printf("Error loading config\n");
         return -1;
     }
 
-    /* FILE SIZE BEFORE */
     long original_size = get_file_size(config.input_file);
     printf("Original file size : %ld bytes\n", original_size);
 
-    /* STEP 1: Divide file into blocks */
     BlockManager *manager =
         divide_into_blocks(config.input_file, config.block_size);
 
     printf("Blocks: %d\n\n", manager->num_blocks);
 
-    /* ENCODING */
+    /* ===================== */
+    /* ===== ENCODING ====== */
+    /* ===================== */
+
     for (int i = 0; i < manager->num_blocks; i++) {
 
         Block *block = &manager->blocks[i];
 
+        /* FIX: Save original data BEFORE encoding overwrites block->data */
+        unsigned char *original_copy = malloc(block->size);
+        memcpy(original_copy, block->data, block->size);
+        size_t original_len = block->size;
+
         printf("Encoding block %d (size: %zu bytes)\n", i, block->size);
 
+        /* STEP 1: RLE-1 */
         unsigned char *rle_output = malloc(block->size * 2 + 10);
         size_t rle_len = 0;
 
-        unsigned char *bwt_output = malloc(block->size * 2 + 10);
-        int index = 0;
-
-        /* STEP 2: RLE */
-        if (config.rle1_enabled) {
+        if (config.rle1_enabled)
             rle1_encode(block->data, block->size, rle_output, &rle_len);
-        } else {
+        else {
             memcpy(rle_output, block->data, block->size);
             rle_len = block->size;
         }
 
-        printf("  After RLE-1 : %zu bytes\n", rle_len);
+        debug_print("  After RLE-1", rle_output, rle_len);
 
-        /* STEP 3: BWT */
-        if (config.bwt_enabled) {
+        /* STEP 2: BWT */
+        unsigned char *bwt_output = malloc(rle_len + 10);
+        int index = 0;
+
+        if (config.bwt_enabled)
             bwt_encode(rle_output, rle_len, bwt_output, &index);
-        } else {
+        else
             memcpy(bwt_output, rle_output, rle_len);
-        }
 
-        printf("  After BWT   : %zu bytes (index: %d)\n", rle_len, index);
+        printf("BWT Primary Index: %d\n", index);
+        debug_print("After BWT", bwt_output, rle_len);
 
-        printf("  Encoded     : ");
-        print_bytes(bwt_output, rle_len);
-        printf("\n\n");
+        /* STEP 3: MTF */
+        unsigned char *mtf_output = malloc(rle_len);
+        mtf_encode(bwt_output, rle_len, mtf_output);
 
-        /* Store index + data */
-        unsigned char *packed = malloc(4 + rle_len);
+        debug_print("After MTF", mtf_output, rle_len);
+
+        /* STEP 4: RLE-2 */
+        unsigned char *rle2_output = malloc(rle_len * 2 + 10);
+        size_t rle2_len = 0;
+
+        rle2_encode(mtf_output, rle_len, rle2_output, &rle2_len);
+
+        debug_print("After RLE-2", rle2_output, rle2_len);
+
+        /* STEP 5: Huffman */
+        unsigned char *huff_output = malloc(rle2_len * 2 + 256);
+        size_t huff_len = 0;
+
+        huffman_encode(rle2_output, rle2_len, huff_output, &huff_len);
+
+        debug_print("After Huffman", huff_output, huff_len);
+
+        /* PACK: [index (4 bytes)] + [size (4 bytes)] + [data] */
+        unsigned char *packed = malloc(8 + huff_len);
 
         packed[0] = (index >> 0) & 0xFF;
         packed[1] = (index >> 8) & 0xFF;
         packed[2] = (index >> 16) & 0xFF;
         packed[3] = (index >> 24) & 0xFF;
 
-        memcpy(packed + 4, bwt_output, rle_len);
+        packed[4] = (huff_len >> 0) & 0xFF;
+        packed[5] = (huff_len >> 8) & 0xFF;
+        packed[6] = (huff_len >> 16) & 0xFF;
+        packed[7] = (huff_len >> 24) & 0xFF;
+
+        memcpy(packed + 8, huff_output, huff_len);
 
         free(block->data);
         block->data = packed;
-        block->size = 4 + rle_len;
+        block->size = 8 + huff_len;
+
+        printf("Final Packed Block Size: %zu bytes\n", block->size);
 
         free(rle_output);
         free(bwt_output);
+        free(mtf_output);
+        free(rle2_output);
+        free(huff_output);
+
+        /* ===================== */
+        /* ===== DECODING ====== */
+        /* ===================== */
+
+        printf("\nDecoding block %d\n", i);
+
+        unsigned char *packed_data = block->data;
+
+        int dec_index =
+            packed_data[0] |
+            (packed_data[1] << 8) |
+            (packed_data[2] << 16) |
+            (packed_data[3] << 24);
+
+        int comp_size =
+            packed_data[4] |
+            (packed_data[5] << 8) |
+            (packed_data[6] << 16) |
+            (packed_data[7] << 24);
+
+        unsigned char *comp = packed_data + 8;
+
+        /* STEP 1: Huffman Decode */
+        unsigned char *rle2_dec = malloc(comp_size * 4);
+        size_t rle2_dec_len = 0;
+
+        huffman_decode(comp, comp_size, rle2_dec, &rle2_dec_len);
+        debug_print("After Huffman Decode", rle2_dec, rle2_dec_len);
+
+        /* STEP 2: RLE-2 Decode */
+        unsigned char *mtf_dec = malloc(rle2_dec_len * 5);
+        size_t mtf_len = 0;
+
+        rle2_decode(rle2_dec, rle2_dec_len, mtf_dec, &mtf_len);
+        /* FIX: use debug_print instead of plain printf */
+        debug_print("After RLE-2 Decode", mtf_dec, mtf_len);
+
+        /* STEP 3: MTF Decode */
+        unsigned char *bwt_dec = malloc(mtf_len);
+        mtf_decode(mtf_dec, mtf_len, bwt_dec);
+        debug_print("After MTF Decode", bwt_dec, mtf_len);
+
+        /* STEP 4: BWT Decode */
+        unsigned char *rle1_dec = malloc(mtf_len);
+
+        if (config.bwt_enabled)
+            bwt_decode(bwt_dec, mtf_len, dec_index, rle1_dec);
+        else
+            memcpy(rle1_dec, bwt_dec, mtf_len);
+
+        debug_print("After BWT Decode", rle1_dec, mtf_len);
+
+        /* STEP 5: RLE-1 Decode */
+        unsigned char *final = malloc(mtf_len * 256);
+        size_t final_len = 0;
+
+        if (config.rle1_enabled)
+            rle1_decode(rle1_dec, mtf_len, final, &final_len);
+        else {
+            memcpy(final, rle1_dec, mtf_len);
+            final_len = mtf_len;
+        }
+
+        debug_print("Final Output", final, final_len);
+
+        printf("  Output               : ");
+        print_bytes(final, final_len);
+        printf("\n");
+
+        /* FIX: compare against original_copy, not the now-overwritten block->data */
+        if (final_len == original_len &&
+            memcmp(final, original_copy, final_len) == 0) {
+            printf("✔ Block %d VERIFIED SUCCESSFULLY\n", i);
+        } else {
+            printf("✘ Block %d VERIFICATION FAILED\n", i);
+        }
+
+        free(rle2_dec);
+        free(mtf_dec);
+        free(bwt_dec);
+        free(rle1_dec);
+        free(final);
+        free(original_copy); /* FIX: free the saved copy */
     }
 
-    /* STEP 4: Write compressed file */
+    /* ===================== */
+    /* ===== FILE I/O ====== */
+    /* ===================== */
+
     reassemble_blocks(manager, config.output_file);
 
-    /* FILE SIZE AFTER */
     long compressed_size = get_file_size(config.output_file);
 
-    printf("Compressed file size : %ld bytes\n", compressed_size);
+    printf("\nCompressed file size : %ld bytes\n", compressed_size);
 
     if (original_size > 0) {
         printf("Compression ratio    : %.4f\n\n",
                (double)compressed_size / original_size);
     }
 
-    /* ===================== */
-    /* ===== DECODING ====== */
-    /* ===================== */
-
-    printf("DECODING\n");
-
-    /* Read original again (for block boundaries) */
-    BlockManager *orig =
-        divide_into_blocks(config.input_file, config.block_size);
-
-    FILE *fp = fopen(config.output_file, "rb");
-
-    for (int i = 0; i < orig->num_blocks; i++) {
-
-        Block *orig_block = &orig->blocks[i];
-
-        /* Recompute encoded size */
-        unsigned char *tmp = malloc(orig_block->size * 2 + 10);
-        size_t rle_len = 0;
-
-        if (config.rle1_enabled)
-            rle1_encode(orig_block->data, orig_block->size, tmp, &rle_len);
-        else
-            rle_len = orig_block->size;
-
-        free(tmp);
-
-        size_t comp_size = 4 + rle_len;
-
-        unsigned char *comp = malloc(comp_size);
-        fread(comp, 1, comp_size, fp);
-
-        int index =
-            comp[0] |
-            (comp[1] << 8) |
-            (comp[2] << 16) |
-            (comp[3] << 24);
-
-        printf("\nDecoding block %d\n", i);
-
-        /* BWT Decode */
-        unsigned char *bwt_dec = malloc(rle_len);
-
-        if (config.bwt_enabled)
-            bwt_decode(comp + 4, rle_len, index, bwt_dec);
-        else
-            memcpy(bwt_dec, comp + 4, rle_len);
-
-        /* RLE Decode */
-        unsigned char *final = malloc(rle_len * 256);
-        size_t final_len = 0;
-
-        if (config.rle1_enabled)
-            rle1_decode(bwt_dec, rle_len, final, &final_len);
-        else {
-            memcpy(final, bwt_dec, rle_len);
-            final_len = rle_len;
-        }
-
-        printf("  Decoded size : %zu\n", final_len);
-
-        printf("  Output       : ");
-        print_bytes(final, final_len);
-        printf("\n");
-
-        free(comp);
-        free(bwt_dec);
-        free(final);
-    }
-
-    fclose(fp);
     free_block_manager(manager);
-    free_block_manager(orig);
 
     return 0;
 }
