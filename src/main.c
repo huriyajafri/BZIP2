@@ -56,6 +56,10 @@ int main() {
 
     BlockManager *manager =
         divide_into_blocks(config.input_file, config.block_size);
+    if (!manager) {
+        printf("Failed to divide file into blocks\n");
+        return -1;
+    }
 
     printf("Blocks: %d\n\n", manager->num_blocks);
 
@@ -85,7 +89,9 @@ int main() {
             rle_len = block->size;
         }
 
-        debug_print("  After RLE-1", rle_output, rle_len);
+        if (!config.benchmark_mode) {
+            debug_print("  After RLE-1", rle_output, rle_len);
+        }
 
         /* STEP 2: BWT */
         unsigned char *bwt_output = malloc(rle_len + 10);
@@ -96,30 +102,51 @@ int main() {
         else
             memcpy(bwt_output, rle_output, rle_len);
 
-        printf("BWT Primary Index: %d\n", index);
-        debug_print("After BWT", bwt_output, rle_len);
+        if (!config.benchmark_mode) {
+            printf("BWT Primary Index: %d\n", index);
+            debug_print("After BWT", bwt_output, rle_len);
+        }
 
         /* STEP 3: MTF */
         unsigned char *mtf_output = malloc(rle_len);
-        mtf_encode(bwt_output, rle_len, mtf_output);
+        if (config.mtf_enabled)
+            mtf_encode(bwt_output, rle_len, mtf_output);
+        else
+            memcpy(mtf_output, bwt_output, rle_len);
 
-        debug_print("After MTF", mtf_output, rle_len);
+        if (!config.benchmark_mode) {
+            debug_print("After MTF", mtf_output, rle_len);
+        }
 
         /* STEP 4: RLE-2 */
         unsigned char *rle2_output = malloc(rle_len * 2 + 10);
         size_t rle2_len = 0;
 
-        rle2_encode(mtf_output, rle_len, rle2_output, &rle2_len);
+        if (config.rle2_enabled)
+            rle2_encode(mtf_output, rle_len, rle2_output, &rle2_len);
+        else {
+            memcpy(rle2_output, mtf_output, rle_len);
+            rle2_len = rle_len;
+        }
 
-        debug_print("After RLE-2", rle2_output, rle2_len);
+        if (!config.benchmark_mode) {
+            debug_print("After RLE-2", rle2_output, rle2_len);
+        }
 
         /* STEP 5: Huffman */
         unsigned char *huff_output = malloc(rle2_len * 2 + 256);
         size_t huff_len = 0;
 
-        huffman_encode(rle2_output, rle2_len, huff_output, &huff_len);
+        if (config.huffman_enabled)
+            huffman_encode(rle2_output, rle2_len, huff_output, &huff_len);
+        else {
+            memcpy(huff_output, rle2_output, rle2_len);
+            huff_len = rle2_len;
+        }
 
-        debug_print("After Huffman", huff_output, huff_len);
+        if (!config.benchmark_mode) {
+            debug_print("After Huffman", huff_output, huff_len);
+        }
 
         /* PACK: [index (4 bytes)] + [size (4 bytes)] + [data] */
         unsigned char *packed = malloc(8 + huff_len);
@@ -174,21 +201,39 @@ int main() {
         unsigned char *rle2_dec = malloc(comp_size * 4);
         size_t rle2_dec_len = 0;
 
-        huffman_decode(comp, comp_size, rle2_dec, &rle2_dec_len);
-        debug_print("After Huffman Decode", rle2_dec, rle2_dec_len);
+        if (config.huffman_enabled)
+            huffman_decode(comp, comp_size, rle2_dec, &rle2_dec_len);
+        else {
+            memcpy(rle2_dec, comp, comp_size);
+            rle2_dec_len = comp_size;
+        }
+        if (!config.benchmark_mode) {
+            debug_print("After Huffman Decode", rle2_dec, rle2_dec_len);
+        }
 
         /* STEP 2: RLE-2 Decode */
         unsigned char *mtf_dec = malloc(rle2_dec_len * 5);
         size_t mtf_len = 0;
 
-        rle2_decode(rle2_dec, rle2_dec_len, mtf_dec, &mtf_len);
-        /* FIX: use debug_print instead of plain printf */
-        debug_print("After RLE-2 Decode", mtf_dec, mtf_len);
+        if (config.rle2_enabled)
+            rle2_decode(rle2_dec, rle2_dec_len, mtf_dec, &mtf_len);
+        else {
+            memcpy(mtf_dec, rle2_dec, rle2_dec_len);
+            mtf_len = rle2_dec_len;
+        }
+        if (!config.benchmark_mode) {
+            debug_print("After RLE-2 Decode", mtf_dec, mtf_len);
+        }
 
         /* STEP 3: MTF Decode */
         unsigned char *bwt_dec = malloc(mtf_len);
-        mtf_decode(mtf_dec, mtf_len, bwt_dec);
-        debug_print("After MTF Decode", bwt_dec, mtf_len);
+        if (config.mtf_enabled)
+            mtf_decode(mtf_dec, mtf_len, bwt_dec);
+        else
+            memcpy(bwt_dec, mtf_dec, mtf_len);
+        if (!config.benchmark_mode) {
+            debug_print("After MTF Decode", bwt_dec, mtf_len);
+        }
 
         /* STEP 4: BWT Decode */
         unsigned char *rle1_dec = malloc(mtf_len);
@@ -198,7 +243,9 @@ int main() {
         else
             memcpy(rle1_dec, bwt_dec, mtf_len);
 
-        debug_print("After BWT Decode", rle1_dec, mtf_len);
+        if (!config.benchmark_mode) {
+            debug_print("After BWT Decode", rle1_dec, mtf_len);
+        }
 
         /* STEP 5: RLE-1 Decode */
         unsigned char *final = malloc(mtf_len * 256);
@@ -211,11 +258,15 @@ int main() {
             final_len = mtf_len;
         }
 
-        debug_print("Final Output", final, final_len);
+        if (!config.benchmark_mode) {
+            debug_print("Final Output", final, final_len);
+        }
 
-        printf("  Output               : ");
-        print_bytes(final, final_len);
-        printf("\n");
+        if (!config.benchmark_mode) {
+            printf("  Output               : ");
+            print_bytes(final, final_len);
+            printf("\n");
+        }
 
         /* FIX: compare against original_copy, not the now-overwritten block->data */
         if (final_len == original_len &&
@@ -241,9 +292,10 @@ int main() {
 
     long compressed_size = get_file_size(config.output_file);
 
-    printf("\nCompressed file size : %ld bytes\n", compressed_size);
-
-    if (original_size > 0) {
+    if (config.output_metrics) {
+        printf("\nCompressed file size : %ld bytes\n", compressed_size);
+    }
+    if (original_size > 0 && config.output_metrics) {
         printf("Compression ratio    : %.4f\n\n",
                (double)compressed_size / original_size);
     }

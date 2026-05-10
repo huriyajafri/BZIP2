@@ -76,7 +76,7 @@ RESULT_CSV := $(RESULT_DIR)/results.csv
 BLOCK_SIZE := 500000
 
 # =============================================================================
-.PHONY: all debug run windows benchmark clean help
+.PHONY: all debug run windows benchmark plot clean help
 
 # --------------------------------------------------------------------------- #
 # all — default build                                                          #
@@ -127,15 +127,16 @@ endif
 
 # --------------------------------------------------------------------------- #
 # benchmark — run every file in benchmarks/ and write results.csv             #
-# Calls the standalone benchmark.sh script for full per-file timing           #
+# Cross-platform Python benchmark runner                                      #
 # --------------------------------------------------------------------------- #
 benchmark: all
-ifeq ($(PLATFORM),windows)
-	@echo "Run 'make benchmark' inside WSL or Git Bash on Windows."
-else
-	@chmod +x benchmark.sh
-	@bash benchmark.sh --block $(BLOCK_SIZE) --dir $(BENCH_DIR)
-endif
+	python scripts/benchmark.py --block-size $(BLOCK_SIZE) --bench-dir $(BENCH_DIR) --results-dir $(RESULT_DIR)
+
+# --------------------------------------------------------------------------- #
+# plot — generate graphs from results.csv                                     #
+# --------------------------------------------------------------------------- #
+plot:
+	python scripts/plot_results.py --csv $(RESULT_CSV) --out $(RESULT_DIR)
 
 # --------------------------------------------------------------------------- #
 # clean                                                                        #
