@@ -12,7 +12,9 @@ typedef struct {
     int huffman_enabled;
     int benchmark_mode;
     int output_metrics;
+    int save_stages;
     char bwt_type[32];
+    char stages_directory[256];
     char input_file[256];
     char output_file[256];
     char input_directory[256];

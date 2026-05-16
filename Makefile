@@ -88,7 +88,8 @@ CLI_OBJECTS := $(OBJ_DIR)/cli.o     \
                $(OBJ_DIR)/bwt.o     \
                $(OBJ_DIR)/mtf.o     \
                $(OBJ_DIR)/huffman.o \
-               $(OBJ_DIR)/config.o
+               $(OBJ_DIR)/config.o  \
+               $(OBJ_DIR)/stages.o
 
 # --------------------------------------------------------------------------- #
 # Benchmark settings (can override on command line)                           #
@@ -168,8 +169,11 @@ endif
 # benchmark — run every file in benchmarks/ and write results.csv             #
 # Cross-platform Python benchmark runner                                      #
 # --------------------------------------------------------------------------- #
-benchmark: all
+benchmark: cli
 	python scripts/benchmark.py --block-size $(BLOCK_SIZE) --bench-dir $(BENCH_DIR) --results-dir $(RESULT_DIR)
+
+benchmark-stages: cli
+	python scripts/benchmark.py --block-size $(BLOCK_SIZE) --bench-dir $(BENCH_DIR) --results-dir $(RESULT_DIR) --save-stages
 
 # --------------------------------------------------------------------------- #
 # plot — generate graphs from results.csv                                     #
@@ -202,7 +206,8 @@ help:
 	@echo "  make run            Build and run benchmark runner"
 	@echo "  make windows        Cross-compile Windows .exe (Linux only)"
 	@echo "                      Needs: sudo apt install gcc-mingw-w64-x86-64"
-	@echo "  make benchmark      Compress all benchmarks/ files → results.csv"
+	@echo "  make benchmark      Compress+decompress all benchmarks/ → results.csv"
+	@echo "  make benchmark-stages  Same, plus hex stage dumps under stages/"
 	@echo "  make benchmark BLOCK_SIZE=900000   Override block size"
 	@echo "  make clean          Remove all build artefacts"
 	@echo "  make help           This message"

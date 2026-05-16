@@ -42,6 +42,44 @@ void debug_print(const char *label, unsigned char *data, size_t len) {
     printf("\n");
 }
 
+/* ---------------------------------------------------------------
+ * save_stage
+ * Writes a raw binary snapshot of one pipeline stage to disk.
+ *
+ * Output path:  stages/<name>.bin
+ *   e.g.  stages/block0_rle1.bin
+ *         stages/block0_bwt.bin
+ *         stages/block0_mtf.bin
+ *         stages/block0_rle2.bin
+ *         stages/block0_huffman.bin
+ *
+ * The "stages/" directory is created automatically.
+ * If the file cannot be opened a warning is printed and the
+ * compression run continues normally — saving is best-effort.
+ * --------------------------------------------------------------- */
+static void save_stage(const char *name, unsigned char *data, size_t len)
+{
+    /* Create the output directory (platform-specific, best-effort) */
+#ifdef _WIN32
+    system("if not exist stages mkdir stages");
+#else
+    system("mkdir -p stages");
+#endif
+
+    char path[256];
+    snprintf(path, sizeof(path), "stages/%s.bin", name);
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "  [stages] Warning: could not write '%s'\n", path);
+        return;
+    }
+    fwrite(data, 1, len, f);
+    fclose(f);
+
+    printf("  [stages] Saved %zu bytes  ->  %s\n", len, path);
+}
+
 int main() {
 
     Config config;
@@ -93,6 +131,13 @@ int main() {
             debug_print("  After RLE-1", rle_output, rle_len);
         }
 
+        /* --- Save RLE-1 stage output --- */
+        {
+            char stage_name[64];
+            snprintf(stage_name, sizeof(stage_name), "block%d_rle1", i);
+            save_stage(stage_name, rle_output, rle_len);
+        }
+
         /* STEP 2: BWT */
         unsigned char *bwt_output = malloc(rle_len + 10);
         int index = 0;
@@ -107,6 +152,13 @@ int main() {
             debug_print("After BWT", bwt_output, rle_len);
         }
 
+        /* --- Save BWT stage output --- */
+        {
+            char stage_name[64];
+            snprintf(stage_name, sizeof(stage_name), "block%d_bwt", i);
+            save_stage(stage_name, bwt_output, rle_len);
+        }
+
         /* STEP 3: MTF */
         unsigned char *mtf_output = malloc(rle_len);
         if (config.mtf_enabled)
@@ -116,6 +168,13 @@ int main() {
 
         if (!config.benchmark_mode) {
             debug_print("After MTF", mtf_output, rle_len);
+        }
+
+        /* --- Save MTF stage output --- */
+        {
+            char stage_name[64];
+            snprintf(stage_name, sizeof(stage_name), "block%d_mtf", i);
+            save_stage(stage_name, mtf_output, rle_len);
         }
 
         /* STEP 4: RLE-2 */
@@ -133,6 +192,13 @@ int main() {
             debug_print("After RLE-2", rle2_output, rle2_len);
         }
 
+        /* --- Save RLE-2 stage output --- */
+        {
+            char stage_name[64];
+            snprintf(stage_name, sizeof(stage_name), "block%d_rle2", i);
+            save_stage(stage_name, rle2_output, rle2_len);
+        }
+
         /* STEP 5: Huffman */
         unsigned char *huff_output = malloc(rle2_len * 2 + 256);
         size_t huff_len = 0;
@@ -146,6 +212,13 @@ int main() {
 
         if (!config.benchmark_mode) {
             debug_print("After Huffman", huff_output, huff_len);
+        }
+
+        /* --- Save Huffman stage output --- */
+        {
+            char stage_name[64];
+            snprintf(stage_name, sizeof(stage_name), "block%d_huffman", i);
+            save_stage(stage_name, huff_output, huff_len);
         }
 
         /* PACK: [index (4 bytes)] + [size (4 bytes)] + [data] */

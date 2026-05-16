@@ -41,6 +41,8 @@ int load_config(const char *filename, Config *config) {
     strcpy(config->output_file, "output.bz2");
     strcpy(config->input_directory, "./benchmarks/");
     strcpy(config->output_directory, "./results/");
+    strcpy(config->stages_directory, "./stages");
+    config->save_stages = 0;
 
     FILE *file = fopen(filename, "r");
     if (!file) {
@@ -99,6 +101,10 @@ int load_config(const char *filename, Config *config) {
             copy_string(config->input_directory, sizeof(config->input_directory), value);
         } else if (strcmp(key, "output_directory") == 0) {
             copy_string(config->output_directory, sizeof(config->output_directory), value);
+        } else if (strcmp(key, "save_stages") == 0) {
+            config->save_stages = parse_bool(value);
+        } else if (strcmp(key, "stages_directory") == 0) {
+            copy_string(config->stages_directory, sizeof(config->stages_directory), value);
         }
     }
 
