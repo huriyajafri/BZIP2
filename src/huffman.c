@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include "huffman.h"
 
 /* =================================================================
@@ -181,10 +182,11 @@ static void generate_codes(int *lengths, HuffmanCode *codes) {
 
     qsort(arr, count, sizeof(SymLen), cmp_symlen);
 
-    int code = 0, prev_len = 0;
+    uint32_t code = 0;
+    int prev_len = 0;
     for (int i = 0; i < count; i++) {
         code <<= (arr[i].length - prev_len);
-        codes[arr[i].symbol].code   = (unsigned short)code;
+        codes[arr[i].symbol].code   = code;
         codes[arr[i].symbol].length = (unsigned char)arr[i].length;
         prev_len = arr[i].length;
         code++;
@@ -245,13 +247,13 @@ void huffman_encode(unsigned char *input, size_t len,
     for (int i = 0; i < 256; i++)
         output[j++] = (unsigned char)lengths[i];
 
-    /* Write encoded bitstream */
-    unsigned int  buf  = 0;
-    int           bits = 0;
+    /* Write encoded bitstream (uint64_t avoids overflow on large blocks) */
+    uint64_t buf  = 0;
+    int      bits = 0;
 
     for (size_t i = 0; i < len; i++) {
         HuffmanCode hc = codes[input[i]];
-        buf   = (buf << hc.length) | hc.code;
+        buf   = (buf << hc.length) | (uint64_t)hc.code;
         bits += hc.length;
         while (bits >= 8) {
             bits -= 8;
@@ -307,32 +309,32 @@ void huffman_decode(unsigned char *input, size_t len,
         if (codes[s].length > max_len) max_len = codes[s].length;
 
     /* Decode bitstream */
-    unsigned int buf  = 0;
-    int          bits = 0;
-    size_t       j    = 0;
+    uint64_t buf  = 0;
+    int      bits = 0;
+    size_t   j    = 0;
 
     while (j < expected_len) {
-        /* Refill buffer until we have at least max_len bits */
         while (bits < max_len && i < len) {
             buf   = (buf << 8) | input[i++];
             bits += 8;
         }
-        if (bits == 0) break;   /* exhausted input */
+        if (bits == 0) break;
 
-        /* Find matching code */
-        int found = 0;
+        int best = -1;
+        int best_len = 0;
         for (int s = 0; s < 256; s++) {
-            if (codes[s].length == 0 || bits < codes[s].length) continue;
-            unsigned int val = (buf >> (bits - codes[s].length)) &
-                               ((1u << codes[s].length) - 1);
-            if (val == (unsigned int)codes[s].code) {
-                output[j++] = (unsigned char)s;
-                bits -= codes[s].length;
-                found = 1;
-                break;
+            int L = codes[s].length;
+            if (L == 0 || bits < L) continue;
+            uint64_t mask = (L >= 64) ? UINT64_MAX : ((UINT64_C(1) << L) - 1);
+            uint64_t val = (buf >> (bits - L)) & mask;
+            if (val == (uint64_t)codes[s].code && L >= best_len) {
+                best = s;
+                best_len = L;
             }
         }
-        if (!found) break;      /* padding bits at end of stream */
+        if (best < 0) break;
+        output[j++] = (unsigned char)best;
+        bits -= best_len;
     }
 
     *out_len = j;
@@ -352,12 +354,12 @@ void write_header(HuffmanCode *codes, unsigned char *output, size_t *out_len) {
 void encode_data(unsigned char *input, size_t len,
                  HuffmanCode *codes, unsigned char *output, size_t *out_len) {
     size_t j = 0;
-    unsigned int buf  = 0;
-    int          bits = 0;
+    uint64_t buf  = 0;
+    int      bits = 0;
 
     for (size_t i = 0; i < len; i++) {
         HuffmanCode hc = codes[input[i]];
-        buf   = (buf << hc.length) | hc.code;
+        buf   = (buf << hc.length) | (uint64_t)hc.code;
         bits += hc.length;
         while (bits >= 8) {
             bits -= 8;

@@ -76,6 +76,8 @@ int load_config(const char *filename, Config *config) {
             }
         } else if (strcmp(key, "rle1_enabled") == 0) {
             config->rle1_enabled = parse_bool(value);
+        } else if (strcmp(key, "bwt_enabled") == 0) {
+            config->bwt_enabled = parse_bool(value);
         } else if (strcmp(key, "bwt_type") == 0) {
             copy_string(config->bwt_type, sizeof(config->bwt_type), value);
             config->bwt_enabled = 1;

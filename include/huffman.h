@@ -2,9 +2,10 @@
 #define HUFFMAN_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
-    unsigned short code;
+    uint32_t code;
     unsigned char length;
 } HuffmanCode;
 

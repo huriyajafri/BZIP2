@@ -167,7 +167,9 @@ int main() {
         block->data = packed;
         block->size = 8 + huff_len;
 
-        printf("Final Packed Block Size: %zu bytes\n", block->size);
+        if (!config.benchmark_mode) {
+            printf("Final Packed Block Size: %zu bytes\n", block->size);
+        }
 
         free(rle_output);
         free(bwt_output);
@@ -179,7 +181,9 @@ int main() {
         /* ===== DECODING ====== */
         /* ===================== */
 
-        printf("\nDecoding block %d\n", i);
+        if (!config.benchmark_mode) {
+            printf("\nDecoding block %d\n", i);
+        }
 
         unsigned char *packed_data = block->data;
 
@@ -189,16 +193,17 @@ int main() {
             (packed_data[2] << 16) |
             (packed_data[3] << 24);
 
-        int comp_size =
-            packed_data[4] |
-            (packed_data[5] << 8) |
-            (packed_data[6] << 16) |
-            (packed_data[7] << 24);
+        unsigned int comp_size =
+            (unsigned int)packed_data[4] |
+            ((unsigned int)packed_data[5] << 8) |
+            ((unsigned int)packed_data[6] << 16) |
+            ((unsigned int)packed_data[7] << 24);
 
         unsigned char *comp = packed_data + 8;
 
         /* STEP 1: Huffman Decode */
-        unsigned char *rle2_dec = malloc(comp_size * 4);
+        size_t buf_cap = original_len + comp_size + 256;
+        unsigned char *rle2_dec = malloc(buf_cap);
         size_t rle2_dec_len = 0;
 
         if (config.huffman_enabled)
@@ -212,7 +217,7 @@ int main() {
         }
 
         /* STEP 2: RLE-2 Decode */
-        unsigned char *mtf_dec = malloc(rle2_dec_len * 5);
+        unsigned char *mtf_dec = malloc(buf_cap);
         size_t mtf_len = 0;
 
         if (config.rle2_enabled)
@@ -226,7 +231,7 @@ int main() {
         }
 
         /* STEP 3: MTF Decode */
-        unsigned char *bwt_dec = malloc(mtf_len);
+        unsigned char *bwt_dec = malloc(buf_cap);
         if (config.mtf_enabled)
             mtf_decode(mtf_dec, mtf_len, bwt_dec);
         else
@@ -236,26 +241,42 @@ int main() {
         }
 
         /* STEP 4: BWT Decode */
-        unsigned char *rle1_dec = malloc(mtf_len);
+        size_t bwt_len = mtf_len;
+        unsigned char *rle1_dec = malloc(bwt_len);
+        if (!rle1_dec) {
+            free(rle2_dec);
+            free(mtf_dec);
+            free(bwt_dec);
+            free(original_copy);
+            return -1;
+        }
 
         if (config.bwt_enabled)
-            bwt_decode(bwt_dec, mtf_len, dec_index, rle1_dec);
+            bwt_decode(bwt_dec, bwt_len, dec_index, rle1_dec);
         else
-            memcpy(rle1_dec, bwt_dec, mtf_len);
+            memcpy(rle1_dec, bwt_dec, bwt_len);
 
         if (!config.benchmark_mode) {
-            debug_print("After BWT Decode", rle1_dec, mtf_len);
+            debug_print("After BWT Decode", rle1_dec, bwt_len);
         }
 
         /* STEP 5: RLE-1 Decode */
-        unsigned char *final = malloc(mtf_len * 256);
+        unsigned char *final = malloc(original_len + 256);
         size_t final_len = 0;
+        if (!final) {
+            free(rle2_dec);
+            free(mtf_dec);
+            free(bwt_dec);
+            free(rle1_dec);
+            free(original_copy);
+            return -1;
+        }
 
         if (config.rle1_enabled)
-            rle1_decode(rle1_dec, mtf_len, final, &final_len);
+            rle1_decode(rle1_dec, bwt_len, final, &final_len);
         else {
-            memcpy(final, rle1_dec, mtf_len);
-            final_len = mtf_len;
+            memcpy(final, rle1_dec, bwt_len);
+            final_len = bwt_len;
         }
 
         if (!config.benchmark_mode) {
@@ -271,9 +292,21 @@ int main() {
         /* FIX: compare against original_copy, not the now-overwritten block->data */
         if (final_len == original_len &&
             memcmp(final, original_copy, final_len) == 0) {
-            printf("✔ Block %d VERIFIED SUCCESSFULLY\n", i);
+            if (!config.benchmark_mode) {
+                printf("Block %d VERIFIED SUCCESSFULLY\n", i);
+            }
         } else {
-            printf("✘ Block %d VERIFICATION FAILED\n", i);
+            printf("Block %d VERIFICATION FAILED\n", i);
+            if (!config.benchmark_mode) {
+                free(rle2_dec);
+                free(mtf_dec);
+                free(bwt_dec);
+                free(rle1_dec);
+                free(final);
+                free(original_copy);
+                free_block_manager(manager);
+                return -1;
+            }
         }
 
         free(rle2_dec);

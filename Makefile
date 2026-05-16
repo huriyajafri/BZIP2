@@ -138,6 +138,8 @@ benchmark: all
 plot:
 	python scripts/plot_results.py --csv $(RESULT_CSV) --out $(RESULT_DIR)
 
+benchmark-all: benchmark plot
+
 # --------------------------------------------------------------------------- #
 # clean                                                                        #
 # --------------------------------------------------------------------------- #

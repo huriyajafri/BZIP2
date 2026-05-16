@@ -60,7 +60,12 @@ def collect_files(bench_dir):
 
 
 def run_cmd(command):
-    return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return subprocess.run(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
 
 
 def main():
@@ -103,12 +108,14 @@ def main():
             write_config(str(config_path), cfg_updates)
 
             t0 = time.perf_counter()
-            run_cmd([str(exe)])
+            proc = run_cmd([str(exe)])
             t1 = time.perf_counter()
 
             src_size = src.stat().st_size
             comp_size = out_file.stat().st_size if out_file.exists() else 0
-            ratio = (comp_size / src_size) if src_size > 0 else 0.0
+            ok = proc.returncode == 0 and comp_size > 0
+            ratio = (comp_size / src_size) if (src_size > 0 and ok) else 0.0
+            status = "OK" if ok else "FAIL"
 
             bz2_ratio = ""
             bz2_time = ""
@@ -142,11 +149,12 @@ def main():
                     "CompressionRatio": f"{ratio:.6f}",
                     "Time": f"{(t1 - t0):.6f}",
                     "Memory": "",
+                    "Status": status,
                     "Bzip2Ratio": bz2_ratio,
                     "Bzip2Time": bz2_time,
                 }
             )
-            print(f"{src.name}: ratio={ratio:.6f} time={(t1 - t0):.4f}s")
+            print(f"{src.name}: {status} ratio={ratio:.6f} time={(t1 - t0):.4f}s")
     finally:
         write_config(str(config_path), original_cfg)
 
@@ -160,6 +168,7 @@ def main():
                 "CompressionRatio",
                 "Time",
                 "Memory",
+                "Status",
                 "Bzip2Ratio",
                 "Bzip2Time",
             ],

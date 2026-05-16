@@ -5,9 +5,7 @@
 static const unsigned char *g_bwt_input = NULL;
 static size_t g_bwt_len = 0;
 
-static int compare_rotation_indices(const void *a, const void *b) {
-    size_t ia = *(const size_t *)a;
-    size_t ib = *(const size_t *)b;
+static int cmp_indices(size_t ia, size_t ib) {
     for (size_t k = 0; k < g_bwt_len; k++) {
         unsigned char ca = g_bwt_input[(ia + k) % g_bwt_len];
         unsigned char cb = g_bwt_input[(ib + k) % g_bwt_len];
@@ -15,6 +13,36 @@ static int compare_rotation_indices(const void *a, const void *b) {
         if (ca > cb) return 1;
     }
     return 0;
+}
+
+static void merge_indices(size_t *arr, size_t *tmp, size_t left, size_t mid, size_t right) {
+    size_t i = left, j = mid, k = left;
+    while (i < mid && j < right) {
+        if (cmp_indices(arr[i], arr[j]) <= 0) {
+            tmp[k++] = arr[i++];
+        } else {
+            tmp[k++] = arr[j++];
+        }
+    }
+    while (i < mid) tmp[k++] = arr[i++];
+    while (j < right) tmp[k++] = arr[j++];
+    for (i = left; i < right; i++) arr[i] = tmp[i];
+}
+
+static void merge_sort_indices(size_t *arr, size_t *tmp, size_t n) {
+    for (size_t width = 1; width < n; width *= 2) {
+        for (size_t left = 0; left < n; left += 2 * width) {
+            size_t mid = left + width;
+            size_t right = left + 2 * width;
+            if (mid > n) mid = n;
+            if (right > n) right = n;
+            if (mid < right) merge_indices(arr, tmp, left, mid, right);
+        }
+    }
+}
+
+static int compare_rotation_indices(const void *a, const void *b) {
+    return cmp_indices(*(const size_t *)a, *(const size_t *)b);
 }
 
 int compare_rotations(const void *a, const void *b) {
@@ -31,7 +59,10 @@ void bwt_encode(unsigned char *input, size_t len,
     }
 
     size_t *indices = malloc(len * sizeof(size_t));
-    if (!indices) {
+    size_t *tmp = malloc(len * sizeof(size_t));
+    if (!indices || !tmp) {
+        free(indices);
+        free(tmp);
         *primary_index = 0;
         return;
     }
@@ -42,7 +73,7 @@ void bwt_encode(unsigned char *input, size_t len,
 
     g_bwt_input = input;
     g_bwt_len = len;
-    qsort(indices, len, sizeof(size_t), compare_rotation_indices);
+    merge_sort_indices(indices, tmp, len);
 
     for (size_t i = 0; i < len; i++) {
         size_t start = indices[i];
@@ -54,6 +85,7 @@ void bwt_encode(unsigned char *input, size_t len,
     }
 
     free(indices);
+    free(tmp);
 }
 
 void bwt_decode(unsigned char *input, size_t len,
@@ -78,22 +110,23 @@ void bwt_decode(unsigned char *input, size_t len,
     }
 
     int occ[256] = {0};
-    int *next = malloc(len * sizeof(int));
-    if (!next) {
+    int *lf = malloc(len * sizeof(int));
+    if (!lf) {
         return;
     }
+
+    /* LF(i) = C[L[i]] + Occ(L[i], i) — walk backward from primary index */
     for (size_t i = 0; i < len; i++) {
         unsigned char c = input[i];
-        int first_col_index = starts[c] + occ[c];
-        next[first_col_index] = (int)i;
+        lf[i] = starts[c] + occ[c];
         occ[c]++;
     }
 
     int row = primary_index;
-    for (size_t out = 0; out < len; out++) {
-        row = next[row];
-        output[out] = input[row];
+    for (size_t out = len; out > 0; out--) {
+        output[out - 1] = input[row];
+        row = lf[row];
     }
 
-    free(next);
+    free(lf);
 }
